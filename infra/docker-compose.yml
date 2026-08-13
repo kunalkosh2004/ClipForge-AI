@@ -1,0 +1,88 @@
+name: clipforge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clipforge
+      POSTGRES_PASSWORD: clipforge
+      POSTGRES_DB: clipforge
+    ports:
+      - "5436:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipforge -d clipforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6382:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ../backend
+      target: dev
+    command: uvicorn clipforge.api.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+asyncpg://clipforge:clipforge@postgres:5432/clipforge
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /app/storage
+      PROMETHEUS_MULTIPROC_DIR: /prom
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: clipforge-api
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+    env_file:
+      - ../backend/.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+      - prom:/prom
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      target: dev
+    command: dramatiq clipforge.worker.tasks clipforge.intelligence.tasks
+    environment:
+      DATABASE_URL: postgresql+asyncpg://clipforge:clipforge@postgres:5432/clipforge
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /app/storage
+      PROMETHEUS_MULTIPROC_DIR: /prom
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: clipforge-worker
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend:/app
+      - prom:/prom
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  prom:
