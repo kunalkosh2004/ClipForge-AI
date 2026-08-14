@@ -42,9 +42,15 @@ class ClipRepository(ABC):
 
     @abstractmethod
     async def update_render(
-        self, clip_id: uuid.UUID, render_storage_key: str, thumbnail_storage_key: str | None = None
+        self,
+        clip_id: uuid.UUID,
+        render_storage_key: str,
+        thumbnail_storage_key: str | None = None,
     ) -> Clip | None:
-        """Update the render storage key after caption rendering. Returns the updated clip or None."""
+        """Update the render storage key after caption rendering.
+
+        Returns the updated clip or None.
+        """
 
     @abstractmethod
     async def delete(self, clip_id: uuid.UUID) -> bool:

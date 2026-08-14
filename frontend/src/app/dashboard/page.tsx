@@ -26,19 +26,17 @@ export default function DashboardPage() {
       router.push("/login");
       return;
     }
-    loadProjects();
+    (async () => {
+      try {
+        const data = await api.listProjects();
+        setProjects(data.items);
+      } catch {
+        router.push("/login");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [router]);
-
-  const loadProjects = async () => {
-    try {
-      const data = await api.listProjects();
-      setProjects(data.items);
-    } catch {
-      router.push("/login");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

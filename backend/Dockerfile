@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl unzip ca-certificates fonts-noto-core \
+    && apt-get install -y --no-install-recommends ffmpeg curl unzip ca-certificates \
+        fonts-noto-core fonts-noto-color-emoji fonts-dejavu-core \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/opt/deno sh \
     && ln -s /opt/deno/bin/deno /usr/local/bin/deno \
     && mkdir -p /opt/opencv \

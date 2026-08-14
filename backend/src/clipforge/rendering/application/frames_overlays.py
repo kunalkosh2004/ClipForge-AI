@@ -160,10 +160,7 @@ def _draw_badge(
     box_w = (right - left) + 2 * _BADGE_PAD_X
     box_h = (bottom - top) + 2 * _BADGE_PAD_Y
     cx = width // 2
-    if position == "top":
-        box_top = _BADGE_MARGIN
-    else:
-        box_top = height - _BADGE_MARGIN - box_h
+    box_top = _BADGE_MARGIN if position == "top" else height - _BADGE_MARGIN - box_h
     box = (cx - box_w // 2, box_top, cx + box_w // 2, box_top + box_h)
     draw.rounded_rectangle(
         (box[0] + 4, box[1] + 4, box[2] + 4, box[3] + 4),
@@ -194,6 +191,8 @@ class _EmojiRenderer:
         if bitmap is None:
             bitmap = self._cbdt_bitmap(glyph_name)
         if bitmap is None:
+            # Glyph exists but has no extractable color bitmap (e.g. COLRv1
+            # fonts) — fall back to a plain PIL render so emoji still show.
             bitmap = self._pil_mask(char, size)
         if bitmap is None:
             return None
@@ -217,9 +216,8 @@ class _EmojiRenderer:
         codepoint = _base_codepoint(char)
         if codepoint is None:
             return None
-        if self._cmap is None:
-            if self._font() is None:
-                return None
+        if self._cmap is None and self._font() is None:
+            return None
         if not self._cmap or codepoint not in self._cmap:
             return None
         return self._cmap[codepoint]
@@ -248,12 +246,21 @@ class _EmojiRenderer:
         if not font or "CBDT" not in font:
             return None
         try:
-            data = font["CBDT"].data.get(glyph_name)
-            if not data:
-                return None
-            return Image.open(BytesIO(data)).convert("RGBA")
+            # Modern fontTools stores per-strike bitmaps in ``strikeData``
+            # (a list of ``{glyph_name: bitmap}`` dicts); the old ``.data``
+            # attribute no longer exists. Bitmap objects expose ``imageData``.
+            strikes = font["CBDT"].strikeData
+            for strike in strikes:
+                data = strike.get(glyph_name)
+                if data is None:
+                    continue
+                raw = getattr(data, "imageData", data)
+                if not raw:
+                    continue
+                return Image.open(BytesIO(raw)).convert("RGBA")
         except Exception:
             return None
+        return None
 
     def _pil_mask(self, char: str, size: int) -> Image.Image | None:
         try:

@@ -84,7 +84,11 @@ class GeminiProvider(AIProvider):
         if not keys:
             raise ValueError("at least one Gemini API key is required")
         self._clients: dict[str, list[tuple[str, genai.Client]]] = {}
-        model_chain = models if models is not None else ([model] if model else list(self._DEFAULT_MODELS))
+        model_chain = (
+            models
+            if models is not None
+            else ([model] if model else list(self._DEFAULT_MODELS))
+        )
         for model_name in model_chain:
             self._clients[model_name] = [
                 (f"key-{i}", genai.Client(api_key=key)) for i, key in enumerate(keys, start=1)

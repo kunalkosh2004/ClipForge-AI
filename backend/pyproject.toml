@@ -49,6 +49,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.11",
+    "aiosqlite>=0.20",
 ]
 
 [tool.hatch.build.targets.wheel]

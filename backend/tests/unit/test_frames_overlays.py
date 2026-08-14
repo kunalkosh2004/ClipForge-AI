@@ -1,8 +1,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from clipforge.rendering.application.frames_overlays import (
     rasterize_overlays_into_frames,
 )
