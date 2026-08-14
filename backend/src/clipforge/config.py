@@ -46,18 +46,26 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _normalize_database_url(cls, value: object) -> object:
-        """Force the asyncpg driver so Render's plain `postgres://` URL works.
+        """Force the asyncpg driver and drop params asyncpg cannot parse.
 
-        Render's internal URL is postgres:// (no driver) and its external
-        URL appends ?sslmode=require, which asyncpg does not understand.
+        Hosted Postgres (Render, Neon) hand out URLs asyncpg rejects:
+        postgres:// without a driver (falls back to psycopg2), and query
+        params like sslmode= / channel_binding= that only libpq accepts.
+        We pin the asyncpg dialect, translate sslmode -> ssl, and strip
+        everything else (e.g. channel_binding) from the query string.
         """
         if not isinstance(value, str) or not value.strip():
             return value
         url = value.strip()
         if url.startswith("postgresql://") or url.startswith("postgres://"):
             url = "postgresql+asyncpg://" + url.split("://", 1)[1]
-        if "?sslmode=" in url:
-            url = url.replace("?sslmode=", "?ssl=")
+        if "?" in url:
+            base, _, query = url.partition("?")
+            params = [
+                p for p in query.split("&") if p and not p.startswith("channel_binding=")
+            ]
+            params = [p.replace("sslmode=", "ssl=", 1) if p.startswith("sslmode=") else p for p in params]
+            url = base + ("?" + "&".join(params) if params else "")
         return url
 
     @field_validator("gemini_models", mode="before")
