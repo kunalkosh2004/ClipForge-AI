@@ -46,13 +46,19 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _normalize_database_url(cls, value: object) -> object:
-        """Force the asyncpg driver so Render's plain `postgres://` URL works."""
-        if isinstance(value, str) and value.strip():
-            url = value.strip()
-            if url.startswith("postgresql://") or url.startswith("postgres://"):
-                url = "postgresql+asyncpg://" + url.split("://", 1)[1]
-            return url
-        return value
+        """Force the asyncpg driver so Render's plain `postgres://` URL works.
+
+        Render's internal URL is postgres:// (no driver) and its external
+        URL appends ?sslmode=require, which asyncpg does not understand.
+        """
+        if not isinstance(value, str) or not value.strip():
+            return value
+        url = value.strip()
+        if url.startswith("postgresql://") or url.startswith("postgres://"):
+            url = "postgresql+asyncpg://" + url.split("://", 1)[1]
+        if "?sslmode=" in url:
+            url = url.replace("?sslmode=", "?ssl=")
+        return url
 
     @field_validator("gemini_models", mode="before")
     @classmethod
