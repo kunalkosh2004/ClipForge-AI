@@ -107,6 +107,40 @@ def test_blueprint_validates_raw_ai_json() -> None:
     assert blueprint.global_style.subtitle_theme.animation == "pop"
 
 
+def test_blueprint_accepts_null_reason_and_track_type() -> None:
+    """Gemini occasionally emits `null` for optional string fields; the
+    blueprint must not fail validation — the normalizer drops bad events."""
+    raw = {
+        "preset": "default",
+        "global_style": {},
+        "clips": [],
+        "timeline": {
+            "events": [
+                {
+                    "track": "camera",
+                    "type": "punch_zoom",
+                    "timestamp": 5.0,
+                    "duration": 0.5,
+                    "reason": None,
+                },
+                {
+                    "track": None,
+                    "type": None,
+                    "timestamp": 6.0,
+                    "reason": "beat drop",
+                },
+            ]
+        },
+    }
+    blueprint = EditingBlueprint.model_validate(raw)
+    assert blueprint.timeline.events[0].reason == ""
+    assert blueprint.timeline.events[1].track == ""
+    assert blueprint.timeline.events[1].type == ""
+    # the invalid event gets dropped by the normalizer, not the validator
+    normalized = normalize_blueprint(blueprint, duration_seconds=30.0)
+    assert all(e.track == "camera" for e in normalized.timeline.events)
+
+
 def test_normalize_clips_clamps_scores_and_dedupes() -> None:
     blueprint = _blueprint(
         clips=[

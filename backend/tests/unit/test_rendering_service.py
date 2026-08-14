@@ -9,7 +9,10 @@ from clipforge.analysis.domain.presets import get_preset
 from clipforge.clips.domain.entities import Clip
 from clipforge.common.ids import uuid7
 from clipforge.common.pagination import PageResult
-from clipforge.rendering.application.service import RenderingService
+from clipforge.rendering.application.service import (
+    RenderingService,
+    _global_grade_event,
+)
 from clipforge.rendering.domain.audio import AudioEngine
 from clipforge.rendering.domain.styles import RenderStyle
 from clipforge.rendering.domain.zoom import ZoomEngine
@@ -487,3 +490,52 @@ def test_apply_style_overrides_layers_ai_directives() -> None:
     assert style.overlays.cta_enabled is True
     assert style.overlays.cta_text == "Subscribe"
     assert style.audio.sfx_enabled is True
+
+
+def test_global_grade_event_converts_blueprint_units() -> None:
+    event = _global_grade_event(
+        {
+            "global_style": {
+                "color_grading": {
+                    "style": "cool moody",
+                    "brightness": -5.0,
+                    "contrast": 15.0,
+                    "temperature": -10.0,
+                    "saturation": -5.0,
+                    "vibrance": 5.0,
+                    "bloom": 10.0,
+                    "glow": 5.0,
+                    "film_grain": 15.0,
+                    "vignette": 20.0,
+                }
+            }
+        }
+    )
+    assert event is not None
+    assert event.track == "color"
+    assert event.type == "grade"
+    assert event.timestamp == 0.0
+    assert event.parameters == {
+        "brightness": -0.05,
+        "contrast": 0.15,
+        "temperature": -0.05,
+        "saturation": 0.95,
+        "vibrance": 0.05,
+        "bloom": 0.1,
+        "glow": 0.05,
+        "film_grain": 0.15,
+        "vignette": 0.2,
+    }
+
+
+def test_global_grade_event_none_without_grading() -> None:
+    assert _global_grade_event(None) is None
+    assert _global_grade_event({}) is None
+    assert _global_grade_event({"global_style": {}}) is None
+    assert _global_grade_event({"global_style": {"color_grading": {}}}) is None
+    assert (
+        _global_grade_event(
+            {"global_style": {"color_grading": {"brightness": 0.0, "bloom": None}}}
+        )
+        is None
+    )

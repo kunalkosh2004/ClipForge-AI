@@ -22,7 +22,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Track(StrEnum):
@@ -121,6 +121,14 @@ class TimelineEvent(BaseModel):
     duration: float = 0.0
     parameters: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
+
+    @field_validator("track", "type", "reason", mode="before")
+    @classmethod
+    def _coerce_null_strings(cls, value: Any) -> Any:
+        """The raw AI output sometimes emits `null` for optional string
+        fields; treat it as empty so the normalizer can drop the event
+        instead of the whole blueprint failing validation."""
+        return "" if value is None else value
 
 
 class EditTimeline(BaseModel):

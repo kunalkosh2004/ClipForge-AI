@@ -16,6 +16,7 @@ from clipforge.clips.domain.entities import Clip
 from clipforge.clips.domain.ports import ClipRepository, ThumbnailGenerator
 from clipforge.common import logging as logging_mod
 from clipforge.common.ports import StorageProvider
+from clipforge.directing.domain.blueprint import TimelineEvent
 from clipforge.lyrics.application.ass import build_motion_caption_ass
 from clipforge.lyrics.application.blueprint import caption_theme_hint
 from clipforge.lyrics.application.frames import build_motion_caption_frames
@@ -32,6 +33,9 @@ from clipforge.processing.infrastructure.ffprobe import (
     download_to_tempfile,
     run_ffprobe,
 )
+from clipforge.rendering.application.frames_overlays import (
+    rasterize_overlays_into_frames,
+)
 from clipforge.rendering.domain.composite import CompositeRenderer
 from clipforge.rendering.domain.formats import canvas_for_format
 from clipforge.rendering.domain.framing import (
@@ -40,12 +44,9 @@ from clipforge.rendering.domain.framing import (
     crop_window_for_target,
     fit_points,
 )
-from clipforge.rendering.domain.ports import CaptionRenderer, FramingAnalyzer
 from clipforge.rendering.domain.overlays import OverlayEngine
+from clipforge.rendering.domain.ports import CaptionRenderer, FramingAnalyzer
 from clipforge.rendering.domain.styles import RenderStyle, apply_style_overrides
-from clipforge.rendering.application.frames_overlays import (
-    rasterize_overlays_into_frames,
-)
 from clipforge.rendering.infrastructure.audio_assets import (
     generate_music_bed,
     generate_sfx,
@@ -390,6 +391,9 @@ class RenderingService:
         events, so videos without a blueprint keep today's exact behavior.
         """
         events_by_track = compile_clip_events(blueprint, clip.start_seconds, clip.end_seconds)
+        grade_event = _global_grade_event(blueprint)
+        if grade_event is not None:
+            events_by_track.setdefault("color", []).append(grade_event)
         if not events_by_track:
             await self._render_clip(
                 clip,
@@ -801,6 +805,67 @@ class RenderingService:
             logger.warning(
                 "status publish failed; continuing", video_id=str(video_id)
             )
+
+
+_GRADE_UNITS: dict[str, tuple[str, float, float]] = {
+    # blueprint key -> (plugin param name, divisor, neutral offset)
+    # The AI Director writes -100..100 (or 0..100) values; the color plugin
+    # expects eq/colorbalance filter units: brightness/temperature have 0 as
+    # neutral, saturation/contrast have 1.0 as neutral (eq's native scale).
+    "brightness": ("brightness", 100.0, 0.0),
+    "contrast": ("contrast", 100.0, 0.0),
+    "temperature": ("temperature", 200.0, 0.0),
+    "saturation": ("saturation", 100.0, 1.0),
+    "vibrance": ("vibrance", 100.0, 0.0),
+    "bloom": ("bloom", 100.0, 0.0),
+    "glow": ("glow", 100.0, 0.0),
+    "film_grain": ("film_grain", 100.0, 0.0),
+    "vignette": ("vignette", 100.0, 0.0),
+}
+
+
+def _global_grade_event(blueprint: dict[str, Any] | None) -> TimelineEvent | None:
+    """Synthesize a whole-clip ``color``-track ``grade`` event from the
+    blueprint's ``global_style.color_grading`` baseline.
+
+    The AI Director expresses color grading as a global baseline, but the
+    color plugin only consumes timeline events; this adapter injects one
+    event (timestamp 0, i.e. the whole clip) so the global grade actually
+    renders. Returns None when the blueprint carries no grading directives.
+    """
+    if not isinstance(blueprint, dict):
+        return None
+    gs = blueprint.get("global_style")
+    if not isinstance(gs, dict):
+        return None
+    grading = gs.get("color_grading")
+    if not isinstance(grading, dict):
+        return None
+
+    parameters: dict[str, float] = {}
+    for key, (param, divisor, neutral) in _GRADE_UNITS.items():
+        value = grading.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number != number:  # NaN guard
+            continue
+        converted = neutral + number / divisor
+        if converted != 0.0:
+            parameters[param] = round(converted, 6)
+    if not parameters:
+        return None
+    return TimelineEvent(
+        track="color",
+        type="grade",
+        timestamp=0.0,
+        duration=0.0,
+        parameters=parameters,
+        reason="global color grading baseline",
+    )
 
 
 def _sfx_kind(overrides: dict | None) -> str:
