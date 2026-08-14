@@ -32,7 +32,13 @@ class Settings(BaseSettings):
     ai_provider: Literal["gemini", "openai", "mock"] = "gemini"
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-flash-latest"
-    gemini_models: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"])
+    gemini_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "gemini-2.5-flash",
+            "gemini-3.5-flash",
+            "gemini-flash-lite-latest",
+        ]
+    )
     gemini_api_keys: Annotated[list[SecretStr], NoDecode] = Field(default_factory=list)
     gemini_daily_token_limit: int = 200_000
     gemini_daily_request_limit: int = 20
@@ -79,6 +85,14 @@ class Settings(BaseSettings):
     storage_root: str = "./storage"
     storage_signing_secret: SecretStr = SecretStr("dev-only-storage-secret")
     public_base_url: str = "http://localhost:8000"
+
+    # S3 storage (STORAGE_BACKEND=s3). Credentials may also come from the
+    # ambient AWS environment / IAM role; explicit keys are optional.
+    s3_bucket: str | None = None
+    s3_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None
+    aws_access_key_id: SecretStr | None = None
+    aws_secret_access_key: SecretStr | None = None
 
     queue_default: str = "default"
     queue_import: str = "import"

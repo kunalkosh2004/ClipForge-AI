@@ -1,4 +1,29 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// API base: an explicit env var wins; otherwise use the same origin when the
+// app is served from a non-local host (reverse proxy / tunnel), falling back
+// to the local dev backend on :8000.
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" &&
+  window.location.hostname !== "localhost" &&
+  window.location.hostname !== "127.0.0.1"
+    ? ""
+    : "http://localhost:8000");
+
+// Signed URLs returned by the backend carry PUBLIC_BASE_URL (e.g.
+// http://localhost:8000). Behind a proxy/tunnel the browser must use the same
+// origin it was served from, so strip the host and keep the path — but only
+// for API-proxied URLs. Presigned S3 URLs point straight at the bucket and
+// must keep their host (the browser uploads/downloads to S3 directly).
+function sameOrigin(url: string): string {
+  if (!url || typeof window === "undefined") return url;
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (!parsed.pathname.startsWith("/api/")) return url;
+    return parsed.pathname + parsed.search;
+  } catch {
+    return url;
+  }
+}
 
 interface ApiError {
   error: { code: string; message: string; request_id?: string };
@@ -206,7 +231,7 @@ class ApiClient {
     contentType: string,
     sizeBytes: number
   ) {
-    return this.request<{
+    const data = await this.request<{
       video_id: string;
       storage_key: string;
       upload_url: string;
@@ -220,6 +245,7 @@ class ApiClient {
         size_bytes: sizeBytes,
       }),
     });
+    return { ...data, upload_url: sameOrigin(data.upload_url) };
   }
 
   async uploadFile(uploadUrl: string, file: File) {
@@ -324,9 +350,10 @@ class ApiClient {
   }
 
   async getClipDownloadUrl(clipId: string) {
-    return this.request<{ download_url: string }>(
+    const data = await this.request<{ download_url: string }>(
       `/api/v1/clips/${clipId}/download`
     );
+    return { download_url: sameOrigin(data.download_url) };
   }
 
   async deleteClip(clipId: string) {

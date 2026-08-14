@@ -73,6 +73,7 @@ Every stage runs as a **Dramatiq background job** (Redis broker) with retries, e
 | Intelligence | Scene / Motion / Beat / Timeline artifact workers (PySceneDetect, librosa, OpenCV YuNet face detection) |
 | Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS 4 |
 | Auth | JWT (access + refresh), Argon2 password hashing |
+| Storage | Local disk (HMAC-signed URLs) or **AWS S3 / S3-compatible** (presigned URLs) |
 | Infra | Docker Compose, Makefile |
 | Observability | structlog, OpenTelemetry tracing, Prometheus metrics, AI usage tracking |
 
@@ -88,6 +89,25 @@ Every stage runs as a **Dramatiq background job** (Redis broker) with retries, e
 - A **Google Gemini API key** (get one at https://aistudio.google.com/apikey) — required for real AI analysis
 
 ### 1. Configure the API key
+
+#### Optional: use S3 for media storage
+
+By default videos/clips are stored on local disk (`STORAGE_ROOT`). To store
+media in AWS S3 (or an S3-compatible bucket like Cloudflare R2) instead:
+
+```bash
+STORAGE_BACKEND=s3
+S3_BUCKET=your-bucket
+S3_REGION=us-east-1            # your bucket's region
+AWS_ACCESS_KEY_ID=...          # optional — falls back to IAM role / ambient env
+AWS_SECRET_ACCESS_KEY=...
+# S3_ENDPOINT_URL=...          # only for S3-compatible providers (R2, MinIO, LocalStack)
+```
+
+The IAM user needs `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and
+`s3:HeadObject` on the bucket, and the bucket needs a **CORS** config allowing
+`PUT`/`GET` from your app's origin (the browser uploads/downloads straight to
+S3 via presigned URLs).
 
 ```bash
 cd backend
@@ -148,7 +168,7 @@ On the dashboard, click **New Project**, give it a name (e.g. `Timeless Reels`).
 
 ### 3. Add a video — two ways
 
-**A. Upload a file** — pick a video (MP4/MOV, up to 1 GiB). The file is uploaded to local storage via a signed URL, then processing starts.
+**A. Upload a file** — pick a video (MP4/MOV). The file goes via a signed URL to local disk, or **directly to your S3 bucket** when `STORAGE_BACKEND=s3`, then processing starts.
 
 **B. Paste a YouTube URL** — the worker downloads it with yt-dlp (watch, shorts, embed, live, and youtu.be links all work).
 
@@ -251,7 +271,7 @@ Guidelines:
 **Rendering fidelity:**
 
 - Output dimensions are exact: 1080×1920 (9:16) / 1920×1080 (16:9) verified by ffprobe.
-- 307 unit tests cover the pipeline (blueprint parsing, plugin filters, transcript merge/gap-fill, caption engines, font loading) — regression-tested, so sync/caption regressions get caught.
+- 315+ unit tests cover the pipeline (blueprint parsing, plugin filters, transcript merge/gap-fill, caption engines, font loading, S3 storage) — regression-tested, so sync/caption/storage regressions get caught.
 
 ---
 
@@ -336,7 +356,11 @@ Backend settings come from `backend/.env` (see `backend/.env.example`):
 | `DATABASE_URL` | `postgresql+asyncpg://clipforge:clipforge@localhost:5436/clipforge` | App DB (compose overrides inside the network) |
 | `REDIS_URL` | `redis://localhost:6382/0` | Broker + Pub/Sub + rate limiting |
 | `JWT_SECRET` | dev secret | Token signing (change in production) |
-| `STORAGE_BACKEND` / `STORAGE_ROOT` | `local` / `./storage` | Media storage (local disk; S3 planned) |
+| `STORAGE_BACKEND` | `local` | `local` (disk + signed URLs) or `s3` (presigned URLs) |
+| `STORAGE_ROOT` | `./storage` | Local storage dir (when `STORAGE_BACKEND=local`) |
+| `S3_BUCKET` / `S3_REGION` | — / `us-east-1` | S3 bucket + region (when `STORAGE_BACKEND=s3`) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | S3 credentials (optional — falls back to IAM role / ambient env) |
+| `S3_ENDPOINT_URL` | — | S3-compatible endpoint (Cloudflare R2, MinIO, LocalStack) |
 | `CAPTION_ENGINE` | `frames` | `frames` (default) / `ass` / `legacy` |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Host used in signed URLs |
 | `LOG_LEVEL` | `INFO` | structlog verbosity |
@@ -349,7 +373,7 @@ Backend settings come from `backend/.env` (see `backend/.env.example`):
 # All tests (unit + API integration; API tests need the Docker stack up)
 cd backend && .venv/bin/pytest tests/ -v
 
-# Unit tests only (no Docker needed) — 307 passing
+# Unit tests only (no Docker needed) — 315+ passing
 cd backend && .venv/bin/pytest tests/unit/ -v
 
 # API integration tests (needs Docker)
@@ -359,7 +383,7 @@ cd backend && .venv/bin/pytest tests/api/ -v
 cd backend && .venv/bin/ruff check src tests && .venv/bin/mypy src
 ```
 
-Coverage highlights: blueprint parsing (incl. AI `null`-field coercion), transcript chunk-merge + gap-fill, Gemini provider fallback chains, plugin filter emission (incl. glow/bloom), caption/font loading, rendering service, auth, pagination.
+Coverage highlights: blueprint parsing (incl. AI `null`-field coercion), transcript chunk-merge + gap-fill, Gemini provider fallback chains, plugin filter emission (incl. glow/bloom), caption/font loading, S3 storage provider, rendering service, auth, pagination.
 
 ---
 
@@ -385,11 +409,11 @@ ClipForge-AI/
 │   │   ├── artifacts/        # Versioned artifact store
 │   │   ├── processing/       # Job tracking, status streaming
 │   │   ├── ai/               # GeminiProvider (chunked ASR, fallback chains)
-│   │   ├── storage/          # Local storage + signed URLs
+│   │   ├── storage/          # Local + S3 storage (presigned URLs)
 │   │   ├── worker/           # Dramatiq pipeline actors
 │   │   ├── usage/ admin/     # AI usage dashboard, admin (jobs/dead letters)
 │   │   └── common/ db/       # Ports, errors, IDs; SQLAlchemy models
-│   ├── tests/                # 307 unit + API tests
+│   ├── tests/                # 315+ unit + API tests
 │   ├── alembic/              # Migrations
 │   ├── vendor/               # Vendored motion-caption wheel (bundled fonts)
 │   └── Dockerfile            # ffmpeg + fonts-noto-core + YuNet ONNX + deno
@@ -416,8 +440,7 @@ ClipForge-AI/
 
 ## Known limitations
 
-- **Storage**: local disk only (S3 provider is planned).
-- **Uploads**: single PUT, 1 GiB ceiling (multipart/resumable planned).
+- **Uploads**: single PUT; 1 GiB ceiling on the local backend (S3 direct uploads bypass the proxy entirely, so S3 handles large files natively).
 - **Transcription**: English-first, quality bounded by Gemini ASR; noisy audio reduces word-timestamp accuracy (the gap-fill handles dropped chunks, not misheard words).
 - **Rendering**: the 9:16 smart-crop tracks a single subject (no multi-object selection yet); captions are auto-placed (no per-clip caption editor UI yet).
 - **Frontend**: functional but minimal — no timeline editor, clip approval flow, or caption restyling UI yet.

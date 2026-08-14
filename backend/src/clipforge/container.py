@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from clipforge.ai.gemini_provider import GeminiProvider
 from clipforge.ai.mock_provider import MockAIProvider
 from clipforge.cache.redis_cache import InMemoryCache, RedisCache
+from clipforge.common.errors import SystemError
 from clipforge.common.logging import get_logger
 from clipforge.common.ports import AIProvider, CacheProvider, QueueBroker, StorageProvider
 from clipforge.common.ports.event_bus import EventBus
@@ -13,6 +14,7 @@ from clipforge.identity.infrastructure.hashing import Argon2PasswordHasher
 from clipforge.identity.infrastructure.tokens import JWTTokenService
 from clipforge.queue.dramatiq_broker import DramatiqBroker
 from clipforge.storage.local_storage import LocalStorageProvider
+from clipforge.storage.s3_storage import S3StorageProvider
 
 
 @dataclass
@@ -30,11 +32,7 @@ class Container:
 def build_container(settings: Settings | None = None) -> Container:
     settings = settings or get_settings()
 
-    storage = LocalStorageProvider(
-        root=settings.storage_root,
-        signing_secret=settings.storage_signing_secret.get_secret_value(),
-        base_url=settings.public_base_url,
-    )
+    storage = _build_storage(settings)
     queue = DramatiqBroker(redis_url=settings.redis_url)
     cache = InMemoryCache() if settings.app_env == "test" else RedisCache(settings.redis_url)
     events = RedisStreamsEventBus(redis_url=settings.redis_url)
@@ -56,6 +54,32 @@ def build_container(settings: Settings | None = None) -> Container:
         events=events,
         identity_hasher=identity_hasher,
         identity_tokens=identity_tokens,
+    )
+
+
+def _build_storage(settings: Settings) -> StorageProvider:
+    if settings.storage_backend == "s3":
+        if not settings.s3_bucket:
+            raise SystemError("STORAGE_BACKEND=s3 requires S3_BUCKET to be set")
+        return S3StorageProvider(
+            bucket=settings.s3_bucket,
+            region=settings.s3_region,
+            access_key_id=(
+                settings.aws_access_key_id.get_secret_value()
+                if settings.aws_access_key_id
+                else None
+            ),
+            secret_access_key=(
+                settings.aws_secret_access_key.get_secret_value()
+                if settings.aws_secret_access_key
+                else None
+            ),
+            endpoint_url=settings.s3_endpoint_url,
+        )
+    return LocalStorageProvider(
+        root=settings.storage_root,
+        signing_secret=settings.storage_signing_secret.get_secret_value(),
+        base_url=settings.public_base_url,
     )
 
 
