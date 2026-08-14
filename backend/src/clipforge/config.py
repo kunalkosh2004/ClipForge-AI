@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     gemini_daily_token_limit: int = 200_000
     gemini_daily_request_limit: int = 20
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: object) -> object:
+        """Force the asyncpg driver so Render's plain `postgres://` URL works."""
+        if isinstance(value, str) and value.strip():
+            url = value.strip()
+            if url.startswith("postgresql://") or url.startswith("postgres://"):
+                url = "postgresql+asyncpg://" + url.split("://", 1)[1]
+            return url
+        return value
+
     @field_validator("gemini_models", mode="before")
     @classmethod
     def _parse_models(cls, value: object) -> object:
