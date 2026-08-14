@@ -62,9 +62,14 @@ class Settings(BaseSettings):
         if "?" in url:
             base, _, query = url.partition("?")
             params = [
-                p for p in query.split("&") if p and not p.startswith("channel_binding=")
+                p
+                for p in query.split("&")
+                if p and not p.startswith("channel_binding=")
             ]
-            params = [p.replace("sslmode=", "ssl=", 1) if p.startswith("sslmode=") else p for p in params]
+            params = [
+                p.replace("sslmode=", "ssl=", 1) if p.startswith("sslmode=") else p
+                for p in params
+            ]
             url = base + ("?" + "&".join(params) if params else "")
         return url
 
