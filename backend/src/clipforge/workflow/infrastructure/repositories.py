@@ -1,7 +1,7 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clipforge.db import models as orm
@@ -103,6 +103,29 @@ class SQLAlchemyWorkflowNodeRepository(WorkflowNodeRepository):
             row.started_at = None
             stale.append(_to_domain(row))
         await self._session.flush()
+        return stale
+
+    async def list_stale_video_ids(
+        self, max_started_age_seconds: int
+    ) -> list[uuid.UUID]:
+        """Distinct videos with at least one running node older than the
+        threshold — used by the boot-time recovery sweep."""
+        stmt = (
+            select(orm.WorkflowNode.video_id, func.min(orm.WorkflowNode.started_at))
+            .where(
+                orm.WorkflowNode.status == orm.WorkflowNodeStatus.RUNNING,
+                orm.WorkflowNode.started_at.is_not(None),
+            )
+            .group_by(orm.WorkflowNode.video_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        cutoff = datetime.now(UTC) - timedelta(seconds=max_started_age_seconds)
+        stale: list[uuid.UUID] = []
+        for video_id, oldest_started in rows:
+            if oldest_started is None:
+                continue
+            if oldest_started.replace(tzinfo=UTC) < cutoff:
+                stale.append(uuid.UUID(str(video_id)))
         return stale
 
     async def _update(self, node_id: uuid.UUID, **fields: object) -> WorkflowNode | None:

@@ -22,6 +22,10 @@ from clipforge.workflow.infrastructure.repositories import SQLAlchemyWorkflowNod
 
 logger = logging_mod.get_logger(__name__)
 
+# Delay before a post-advance reconcile runs — lets parallel siblings claim
+# their nodes first so the sweep only catches genuinely stale ones.
+RECONCILE_DELAY_MS = 5_000
+
 # One dramatiq broker/container is shared with the legacy pipeline (both
 # modules load into the same worker process); the intelligence actors remain
 # a self-contained module so they can be moved to their own process later.
@@ -184,6 +188,16 @@ async def _advance(video_id: uuid.UUID) -> None:
         engine = WorkflowEngine(SQLAlchemyWorkflowNodeRepository(session), _container.queue)
         await engine.advance(video_id)
         await session.commit()
+    # Self-healing: if a sibling node was left `running` by a crashed worker
+    # (or is hung past the stale threshold), a delayed reconcile resets it and
+    # re-enqueues it while this process is still alive. No-op when nothing is
+    # stale.
+    _container.queue.enqueue(
+        "workflow_reconcile",
+        {"video_id": str(video_id)},
+        queue=_container.settings.queue_media,
+        delay=RECONCILE_DELAY_MS,
+    )
 
 
 async def _handle_failure(video_id: uuid.UUID, kind: str, exc: Exception) -> None:

@@ -91,6 +91,18 @@ class FakeNodeRepo(WorkflowNodeRepository):
             stale.append(updated)
         return stale
 
+    async def list_stale_video_ids(
+        self, max_started_age_seconds: int
+    ) -> list[uuid.UUID]:
+        now = datetime.now(UTC)
+        stale: set[uuid.UUID] = set()
+        for node in self._nodes.values():
+            if node.status != NODE_RUNNING or node.started_at is None:
+                continue
+            if (now - node.started_at).total_seconds() > max_started_age_seconds:
+                stale.add(node.video_id)
+        return list(stale)
+
     def _transition(self, node_id: uuid.UUID, status: str) -> WorkflowNode | None:
         node = self._by_id(node_id)
         if node is None:

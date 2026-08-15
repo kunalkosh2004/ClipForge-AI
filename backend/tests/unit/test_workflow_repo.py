@@ -98,6 +98,29 @@ async def test_reset_stale_keeps_fresh(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_stale_video_ids_returns_only_old_running(session: AsyncSession) -> None:
+    repo = SQLAlchemyWorkflowNodeRepository(session)
+    old_video = uuid.uuid4()
+    fresh_video = uuid.uuid4()
+
+    old_node = await repo.create(_node(old_video, kind="metadata"))
+    old_node = await repo.mark_running(old_node.id)
+    assert old_node is not None
+    fresh_node = await repo.create(_node(fresh_video, kind="motion"))
+    fresh_node = await repo.mark_running(fresh_node.id)
+    assert fresh_node is not None
+    await session.execute(
+        orm.WorkflowNode.__table__.update()
+        .where(orm.WorkflowNode.id == old_node.id)
+        .values(started_at=datetime.now(UTC) - timedelta(seconds=600))
+    )
+    await session.commit()
+
+    stale = await repo.list_stale_video_ids(max_started_age_seconds=60)
+    assert stale == [old_video]
+
+
+@pytest.mark.asyncio
 async def test_duplicate_kind_violates_unique_constraint(session: AsyncSession) -> None:
     repo = SQLAlchemyWorkflowNodeRepository(session)
     video_id = uuid.uuid4()

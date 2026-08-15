@@ -58,6 +58,7 @@ from clipforge.rendering.infrastructure.ffmpeg_renderer import FFmpegCaptionRend
 from clipforge.rendering.infrastructure.framing_analyzer import OpenCVFramingAnalyzer
 from clipforge.videos.infrastructure.repositories import SQLAlchemyVideoRepository
 from clipforge.videos.infrastructure.youtube import YouTubeDownloader
+from clipforge.workflow.application.recovery import WorkflowRecoveryMiddleware
 
 logger = logging_mod.get_logger(__name__)
 
@@ -76,6 +77,15 @@ broker: dramatiq.Broker = RedisBroker(url=settings.redis_url)  # type: ignore[no
 dramatiq.set_broker(broker)
 
 _container = build_container(settings)
+
+# Heal workflows left `running` by a worker that crashed mid-job: every time
+# a worker process boots it sweeps for stale nodes and schedules recovery.
+broker.add_middleware(
+    WorkflowRecoveryMiddleware(
+        queue=_container.queue,
+        queue_name=settings.queue_media,
+    )
+)
 
 
 def task(

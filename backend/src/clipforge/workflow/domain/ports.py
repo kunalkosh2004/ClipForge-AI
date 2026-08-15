@@ -39,3 +39,11 @@ class WorkflowNodeRepository(ABC):
     ) -> list[WorkflowNode]:
         """Return running nodes started more than `max_started_age_seconds`
         ago, reset to `waiting` (used for crash recovery)."""
+
+    @abstractmethod
+    async def list_stale_video_ids(
+        self, max_started_age_seconds: int
+    ) -> list[uuid.UUID]:
+        """Return distinct video ids that have a running node started more
+        than `max_started_age_seconds` ago (used for boot-time recovery
+        sweeps)."""
