@@ -132,7 +132,12 @@ def _build_client(
         "region_name": region,
         "config": BotoConfig(
             signature_version="s3v4",
-            s3={"addressing_style": "auto"},
+            # Virtual-hosted addressing pins presigned URLs to the regional
+            # endpoint ({bucket}.s3.{region}.amazonaws.com). With "auto" the
+            # global endpoint is used, which 307-redirects for buckets outside
+            # us-east-1 — the redirect breaks the signature and browser
+            # uploads/downloads fail with 403.
+            s3={"addressing_style": "virtual"},
             retries={"max_attempts": 5, "mode": "standard"},
         ),
     }

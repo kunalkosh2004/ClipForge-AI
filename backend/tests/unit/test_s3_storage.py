@@ -5,7 +5,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from clipforge.common.errors import EntityNotFoundError
-from clipforge.storage.s3_storage import S3StorageProvider
+from clipforge.storage.s3_storage import S3StorageProvider, _build_client
 
 
 class FakeS3Client:
@@ -150,3 +150,20 @@ async def test_signed_download_url(provider: tuple[S3StorageProvider, FakeS3Clie
     method, params, _ = client.presigned[-1]
     assert method == "get_object"
     assert params == {"Bucket": "clipforge-test", "Key": "clips/abc/out.mp4"}
+
+
+def test_build_client_uses_regional_addressing() -> None:
+    """Presigned URLs must target the regional endpoint, not the global one —
+    the global endpoint 307-redirects for buckets outside us-east-1, which
+    breaks the signature and kills browser uploads/downloads."""
+    client = _build_client(
+        region="ap-south-1",
+        access_key_id="AKIA_TEST",
+        secret_access_key="secret",
+        endpoint_url=None,
+    )
+    assert client.meta.region_name == "ap-south-1"
+    assert client.meta.config.s3["addressing_style"] == "virtual"
+    # No endpoint_url override: the SDK targets the regional endpoint, so
+    # presigned URLs use {bucket}.s3.{region}.amazonaws.com (no redirect).
+    assert client.meta.endpoint_url == "https://s3.ap-south-1.amazonaws.com"
